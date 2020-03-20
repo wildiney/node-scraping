@@ -1,5 +1,6 @@
 const puppeteer = require('puppeteer')
 const cheerio = require('cheerio')
+const json2csv = require('json2csv')
 const fs = require('fs')
 
 
@@ -7,7 +8,6 @@ class Scraping {
   constructor(url) {
     this.url = url,
       this.urls = []
-    this.products = []
   }
 
   async extractLinks(site) {
@@ -45,14 +45,12 @@ class Scraping {
 
   async extractContent() {
     const urls = JSON.parse(fs.readFileSync('./urls.json'))
-
     const browser = await puppeteer.launch({
-      headless: false
+      headless: true
     })
     const page = await browser.newPage()
     page.setViewport({ width: 1280, height: 960 })
     //await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.108 Safari/537.36');
-
 
     for (let i = 0; i < urls.length; i++) {
       const newurl = urls[i].url
@@ -65,43 +63,50 @@ class Scraping {
 
       let html = await page.content()
       const $ = await cheerio.load(html)
-      await page.waitFor(2000)
+      
+      await page.waitFor(15000)
 
-      const qtdProdutos = $('#product-list > div > div:nth-child(3) > div.col-xs-12.col-sm-10.col-md-9.col-lg-10 > div > div > div.row > div.col-sm-4.col-md-4.col-lg-4 > p').text().split(' ')[3]
+      const qtdProdutosSelector = '#product-list > div > div:nth-child(3) > div.col-xs-12.col-sm-10.col-md-9.col-lg-10 > div > div > div.row > div.col-sm-4.col-md-4.col-lg-4 > p'
+      await page.waitForSelector(qtdProdutosSelector)
+
+      const qtdProdutos = $(qtdProdutosSelector).text().split(' ')[3]
       console.log(qtdProdutos)
 
+      // try {
       for (let k = 0; k < qtdProdutos / 12; k++) {
         await page.evaluate(() => window.scrollTo(0, Number.MAX_SAFE_INTEGER));
-        await page.waitFor(1000)
+        await page.waitFor(1500)
       }
 
-      await page.waitFor(10000)
+      await page.waitForSelector(`#product-list > div > div:nth-child(3) > div.col-xs-12.col-sm-10.col-md-9.col-lg-10 > div > div > div.row > infinite-scroll > div:nth-child(1) > product-card > div > div > div`)
 
-      for (let j = 1; j < qtdProdutos; j++) {
-        try {
-          await page.waitForSelector(`#product-list > div > div:nth-child(3) > div.col-xs-12.col-sm-10.col-md-9.col-lg-10 > div > div > div.row > infinite-scroll > div:nth-child(${j}) > product-card > div > div > div > div.thumbnail > div > div.container-card__body > a > p`)
-          let link = $(`#product-list > div > div:nth-child(3) > div.col-xs-12.col-sm-10.col-md-9.col-lg-10 > div > div > div.row > infinite-scroll > div:nth-child(${j}) > product-card > div > div > div > div.thumbnail > div > div.container-card__body > a`).attr('href')
-          let name = $(`#product-list > div > div:nth-child(3) > div.col-xs-12.col-sm-10.col-md-9.col-lg-10 > div > div > div.row > infinite-scroll > div:nth-child(${j}) > product-card > div > div > div > div.thumbnail > div > div.container-card__body > a > p`).text().replace('\n', '').trim()
-          let sku =  $(`#product-list > div > div:nth-child(3) > div.col-xs-12.col-sm-10.col-md-9.col-lg-10 > div > div > div.row > infinite-scroll > div:nth-child(${j}) > product-card > div > div > div`).attr('produto-sku')
-          let price = $(`#product-list > div > div:nth-child(3) > div.col-xs-12.col-sm-10.col-md-9.col-lg-10 > div > div > div.row > infinite-scroll > div:nth-child(${j}) > product-card > div > div > div > div.thumbnail > div > div.container-card__body > a > div.panel-prices.placeholder-item.ng-scope > div > span > div > p`).text().replace('\n', '').trim()
+      const products = await page.$$eval('.panel-product',(item)=>{
+        let items=[]
+        item.forEach((element) => {
+          let category = element.getAttribute('categoria')
+          let subCategory = element.getAttribute('subcategoria')
+          let productName = element.getAttribute('produto-nome')
+          let productSku = element.getAttribute('produto-sku')
+          let productPrice = element.getAttribute('produto-preco')
+          let productLink = element.querySelector('.thumbnail a').getAttribute('href')
 
-          let object = `"${category}","${sku}", "${name}", "${price}", "${link}"\n`
-          if (name !== '') {
-            console.log(j, object)
-            fs.appendFileSync('products.csv', object)
-          } else {
-            console.log(j, "Erro", object)
+          //let product = `{"categoria":"${category}","subcategoria":"${subCategory}","produto":"${productName}","sku":"${productSku}","preco":"${productPrice}","link":"${productLink}"}`
+          let product = `"${category}","${subCategory}","${productName}","${productSku}","${productPrice}","${productLink}"\n`
+          if (productName !== '') {
+            items.push(product)
           }
-        }
-        catch (e) {
-          console.log(e.message)
-        }
-      }
+        })
+        return items;
+      })
+      //fs.appendFileSync('products.json', JSON.stringify(products))
+      fs.appendFileSync('products.csv', products)
     }
+
 
     await browser.close()
     console.log("Finishing")
   }
+
 }
 
 
